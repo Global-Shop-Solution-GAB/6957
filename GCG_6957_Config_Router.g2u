@@ -1,0 +1,313 @@
+﻿Program.Sub.Preflight.Start
+V.Global.sFileLocation.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+	F.ODBC.Connection!con.OpenCompanyConnection
+	f.Intrinsic.Control.CallSub(CreateDir)
+	f.Intrinsic.Control.SelectCase(V.Caller.Hook)	
+		'Script 1 Button'
+		F.Intrinsic.Control.Case("49510")
+			F.Intrinsic.Control.CallSub(ScriptButtonPress)
+			
+		'Pre Save'
+		F.Intrinsic.Control.Case("49530")
+			F.Intrinsic.Control.CallSub(PreSave)
+			
+		'Pre Configurator Button Order Entry'
+		F.Intrinsic.Control.Case("12370")
+			F.Intrinsic.Control.CallSub(ConfigButtonOrder)
+			
+		'Pre Configurator Button Quotes'
+		F.Intrinsic.Control.Case("10640")
+			F.Intrinsic.Control.CallSub(ConfigButtonQuote)
+															
+	f.Intrinsic.Control.EndSelect
+	
+	'Close connection
+	f.ODBC.Connection!con.Close
+	f.Intrinsic.Control.End		
+			
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+
+Program.Sub.Main.End
+
+Program.Sub.ScriptButtonPress.Start
+v.Local.sConfiguredPart.Declare
+v.Local.sConfiguredPartPath.Declare
+v.Local.sOrderNoPath.Declare
+v.Local.sQuoteNoPath.Declare
+v.Local.sOrderNo.Declare
+v.Local.sQuoteNo.Declare
+v.Local.sPadOrderNo.Declare
+v.Local.sPadQuoteNo.Declare
+v.Local.sPadLine.Declare
+v.Local.sQuotePadLine.Declare
+v.Local.fSumReturn.Declare
+v.Local.sSequence.Declare
+v.Local.sRouter.Declare
+v.Local.sSQL.Declare
+v.Local.iC.Declare
+v.Local.iRet.Declare
+v.Local.sRet.Declare
+v.Local.sQuoteOROrder.Declare
+F.Intrinsic.Control.Try
+	
+	'Grab passed router/configured part
+	f.Intrinsic.String.Build("{0}\CUSTOM\6957\ConfiguredPart.txt",v.Caller.GlobalDir,v.Local.sConfiguredPartPath)					
+	f.Intrinsic.File.File2String(v.Local.sConfiguredPartPath,v.Local.sConfiguredPart)
+	
+	'Grab order no and order line
+	'f.Intrinsic.String.Build("{0}\CUSTOM\6957\OrderNo.txt",v.Caller.GlobalDir,v.Local.sOrderNoPath)					
+	'f.Intrinsic.File.File2String(v.Local.sOrderNoPath,v.Local.sOrderNo)	
+	f.Global.Registry.ReadValue(v.Caller.User,v.Caller.CompanyCode,"Order",6957,0,5,"",v.Local.sOrderNo)
+	
+	f.Intrinsic.String.Split(v.local.sOrderNo,"*!*",v.Local.sOrderNo)
+	f.Intrinsic.String.LPad(v.Local.sOrderNo(1),"0",3,v.Local.sPadLine)
+	f.Intrinsic.String.RPad(v.Local.sPadLine,"0",4,v.Local.sPadLine)
+	
+	f.Intrinsic.String.LPad(v.Local.sOrderNo(0),"0",7,v.Local.sPadOrderNo)
+	
+		
+	'Grab Quote no and Quote line
+	'f.Intrinsic.String.Build("{0}\CUSTOM\6957\QuoteNo.txt",v.Caller.GlobalDir,v.Local.sQuoteNoPath)					
+	'f.Intrinsic.File.File2String(v.Local.sQuoteNoPath,v.Local.sQuoteNo)	
+	f.Global.Registry.ReadValue(v.Caller.User,v.Caller.CompanyCode,"Quote",6957,0,5,"",v.Local.sQuoteNo)
+	
+	f.Intrinsic.String.Split(v.local.sQuoteNo,"*!*",v.Local.sQuoteNo)
+	f.Intrinsic.String.LPad(v.Local.sQuoteNo(1),"0",3,v.Local.sQuotePadLine)
+	f.Intrinsic.String.RPad(v.Local.sQuotePadLine,"0",4,v.Local.sQuotePadLine)
+	
+	f.Intrinsic.String.LPad(v.Local.sQuoteNo(0),"0",7,v.Local.sPadQuoteNo)
+
+	
+	'Yes I know its weird. Couldn't quickly find a way to pass if its from the quote or order screen.
+	'f.Intrinsic.UI.Msgbox("Yes for Order Entry. No for Quotes.","Router Configurator",4,v.Local.iRet)
+	v.Local.sQuoteOROrder.Set(v.Passed.GLOBAL)
+	
+	'f.Intrinsic.Control.If(v.Local.iRet,=,6)
+	f.Intrinsic.Control.If(v.Local.sQuoteOROrder,=,"O")
+		'Grab data from ORDER_CONFIG based on passed order no and order line
+		f.Intrinsic.String.Build("Select * from ORDER_CONFIG where ORDER_NO = '{0}' and ORDER_LINE = '{1}' Order By SEQUENCE",v.Local.sPadOrderNo,v.Local.sPadLine,v.Local.sSQL)
+		f.Data.Datatable.CreateFromSQL("dtOrderConfig","con",v.Local.sSQL,true)
+	
+	f.Intrinsic.Control.Else
+		'Grab data from QUOTE_CONFIG based on passed order no and order line
+		f.Intrinsic.String.Build("Select * from QUOTE_CONFIG where QUOTE_NO = '{0}' and QUOTE_LINE = '{1}' Order By SEQUENCE",v.Local.sPadQuoteNo,v.Local.sQuotePadLine,v.Local.sSQL)
+		f.Data.Datatable.CreateFromSQL("dtOrderConfig","con",v.Local.sSQL,true)
+	
+	f.Intrinsic.Control.EndIf
+	
+	'Check if record was saved
+	f.Intrinsic.Control.If(v.DataTable.dtOrderConfig.RowCount,=,0)
+		f.Intrinsic.UI.Msgbox("Config not found. Please save before clicking Update RT","Router Configurator",0,v.Local.iRet)
+		f.Intrinsic.Control.GoTo("NotFound")
+	f.Intrinsic.Control.EndIf
+
+	'Grab data from CONFIG_MFG based on first sequence base id from previous query
+	f.Intrinsic.String.Build("select BASE_ID, CAST(ID_NUM as int) as ID_NUM, IDENTIFIER, ROUTER, LMO, ROUTER_SEQUENCE,RUNTIME,WORKCENTER, OP_CODE from CONFIG_MFG where BASE_ID = '{0}' and LMO = 'L'",v.DataTable.dtOrderConfig(0).BASE_ID!FIELDVALTRIM,v.Local.sSQL)
+	f.Data.Datatable.CreateFromSQL("dtConfigMFG","con",v.Local.sSQL,true)
+
+	'Check if Configured Part is a valid Router
+	f.Intrinsic.String.Build("Select * from Router_Header where ROUTER = '{0}'",v.DataTable.dtOrderConfig(0).ROUTER_OR_BOM!FIELDVALTRIM,v.Local.sSQL)
+	f.ODBC.Connection!con.OpenRecordsetRW("rstRouterCheck",v.Local.sSQL)
+	f.Intrinsic.Control.If(v.ODBC.con!rstRouterCheck.EOF)
+		f.Intrinsic.UI.Msgbox("Configured Part does not have a corresponding router.")
+		f.ODBC.Con!rstRouterCheck.Close
+		f.Intrinsic.Control.ExitTry
+	f.Intrinsic.Control.EndIf
+	f.ODBC.Con!rstRouterCheck.Close
+	v.Local.sRouter.Set(v.DataTable.dtOrderConfig(0).ROUTER_OR_BOM!FIELDVALTRIM)
+
+	
+	'Set Rate and runtime Router O Lines 
+'	f.Intrinsic.String.Build("Select * from ROUTER_LINE where ROUTER = '{0}' and ROUTER_TYPE = 'O'",v.Local.sRouter,v.Local.sSQL)
+'	f.Data.Datatable.CreateFromSQL("dtRouterOLines","con",v.Local.sSQL,true)
+'	f.Intrinsic.Control.For(v.Local.iC,0,v.DataTable.dtRouterOLines.RowCount--,1)
+'		f.Intrinsic.Control.If(v.DataTable.dtRouterOLines(v.Local.iC).ROUTER_TYPE!FIELDVALTRIM,=,"O")
+'			f.Intrinsic.String.Build("UPDATE ROUTER_LINE SET RATE = '{0}', RUN_TIME = '1' where ROUTER = '{1}' and LINE_ROUTER = '{2}' and ROUTER_TYPE = 'O'",v.DataTable.dtRouterOLines(v.Local.iC).RUN_TIME!FIELDVALTRIM,v.DataTable.dtRouterOLines(v.Local.iC).ROUTER!FIELDVALTRIM,v.DataTable.dtRouterOLines(v.Local.iC).LINE_ROUTER!FIELDVALTRIM,v.Local.sSQL)
+'			f.ODBC.Connection!con.Execute(v.Local.sSQL)
+'		f.Intrinsic.Control.EndIf
+'	f.Intrinsic.Control.Next(v.Local.iC)
+'	f.Data.Datatable.Close("dtRouterOLines")
+	
+	
+	'F.Data.Linq.Join("leftjoin","datatable","dtOrderConfig*!*O","datatable","dtConfigMFG*!*M","O.BASE_ID = M.BASE_ID and O.IDENTIFIER = M.IDENTIFIER","O.ORDER_NO*!*O.ORDER_LINE*!*O.SEQUENCE*!*O.BASE_ID*!*O.ID_NUM*!*O.IDENTIFIER*!*O.LABEL*!*O.PARENT_ID*!*O.PARENT_IDENTIFIER*!*O.PARENT_LABEL*!*O.QUANTITY*!*O.PART_FRAG*!*O.PART_FRAG_POS*!*O.DESC_FRAG*!*O.DES_FRAG_POS*!*O.WEIGHT*!*O.FLAG_ROUTER_BOM*!*O.ROUTER_OR_BOM*!*O.PROD_LINE*!*O.DETERMINES_PL*!*O.EXCLUDE_DISC*!*O.PRINT_PRICE*!*O.VALUE*!*O.MATL_COST*!*O.LABOR_COST*!*O.PRICE*!*O.LIST_SUMMARY*!*O.PRINT_OPTION*!*O.FILLER*!*M.BASE_ID*!*M.ID_NUM*!*M.CFG_SEQUENCE*!*M.IDENTIFIER*!*M.FLAG_BOM_CFG_PART*!*M.BOM*!*M.BOM_QTY*!*M.FLAG_RTR_CFG_PART*!*M.ROUTER*!*M.FLAG_UNIQUE_RTR*!*M.FLAT_ROUTER*!*M.LMO*!*M.ROUTER_SEQUENCE*!*M.PART_FRAG*!*M.PART_FRAG_POSITION*!*M.WORKCENTER*!*M.OP_CODE*!*M.FLAG_USE_CFG_QTY*!*M.RUNTIME*!*M.SETUP*!*M.FREQUENCY*!*M.MINIMUM*!*M.DESCRIPTION*!*M.FLAG_CUTLIST*!*M.PROPERTY_CODE*!*M.DIMENSION_1*!*M.DIMENSION_2*!*M.DIMENSION_3*!*M.DIMENSION_4*!*M.DIMENSION_5*!*M.DENSITY*!*M.RTR_DESC*!*M.DESC_FRAG_POS*!*M.COST*!*M.CATEGORY*!*M.SOURCE*!*M.FLOAT*!*M.FILLER1","","","","dtJoin",True)
+
+	'F.Data.Linq.Join("innerjoin","datatable","dtOrderConfig*!*O","datatable","dtConfigMFG*!*M","O.BASE_ID = M.BASE_ID and O.IDENTIFIER = M.IDENTIFIER","O.ORDER_NO*!*O.ORDER_LINE*!*O.SEQUENCE*!*O.BASE_ID*!*O.ID_NUM*!*O.IDENTIFIER*!*O.LABEL*!*O.PARENT_ID*!*O.PARENT_IDENTIFIER*!*O.PARENT_LABEL*!*O.QUANTITY*!*O.PART_FRAG*!*O.PART_FRAG_POS*!*O.DESC_FRAG*!*O.DES_FRAG_POS*!*O.WEIGHT*!*M.BASE_ID*!*M.ID_NUM*!*M.CFG_SEQUENCE*!*M.IDENTIFIER*!*M.FLAG_BOM_CFG_PART*!*M.BOM*!*M.BOM_QTY*!*M.FLAG_RTR_CFG_PART*!*M.ROUTER*!*M.FLAG_UNIQUE_RTR*!*M.FLAT_ROUTER*!*M.LMO*!*M.ROUTER_SEQUENCE*!*M.PART_FRAG*!*M.PART_FRAG_POSITION*!*M.WORKCENTER*!*M.OP_CODE*!*M.FLAG_USE_CFG_QTY*!*M.RUNTIME","","","","dtJoin",True)
+	
+	'Join tables based on base id and identifier
+	f.Intrinsic.Control.If(v.Local.sQuoteOROrder,=,"O")
+		F.Data.Linq.Join("leftjoin","datatable","dtOrderConfig*!*O","datatable","dtConfigMFG*!*M","O.BASE_ID = M.BASE_ID and O.IDENTIFIER = M.IDENTIFIER","O.ORDER_NO*!*O.ORDER_LINE*!*O.SEQUENCE*!*O.BASE_ID*!*O.ID_NUM*!*O.IDENTIFIER*!*O.LABEL*!*O.PARENT_ID*!*O.PARENT_IDENTIFIER*!*O.PARENT_LABEL*!*O.QUANTITY*!*O.PART_FRAG*!*O.PART_FRAG_POS*!*O.DESC_FRAG*!*O.DES_FRAG_POS*!*O.WEIGHT*!*M.BASE_ID*!*M.ID_NUM*!*M.IDENTIFIER*!*M.ROUTER*!*M.LMO*!*M.ROUTER_SEQUENCE*!*M.RUNTIME*!*M.WORKCENTER*!*M.OP_CODE","","","","dtJoin",True)
+	f.Intrinsic.Control.Else
+		F.Data.Linq.Join("leftjoin","datatable","dtOrderConfig*!*O","datatable","dtConfigMFG*!*M","O.BASE_ID = M.BASE_ID and O.IDENTIFIER = M.IDENTIFIER","O.QUOTE_NO*!*O.QUOTE_LINE*!*O.SEQUENCE*!*O.BASE_ID*!*O.ID_NUM*!*O.IDENTIFIER*!*O.LABEL*!*O.PARENT_ID*!*O.PARENT_IDENTIFIER*!*O.PARENT_LABEL*!*O.QUANTITY*!*O.PART_FRAG*!*O.PART_FRAG_POS*!*O.DESC_FRAG*!*O.DES_FRAG_POS*!*O.WEIGHT*!*M.BASE_ID*!*M.ID_NUM*!*M.IDENTIFIER*!*M.ROUTER*!*M.LMO*!*M.ROUTER_SEQUENCE*!*M.RUNTIME*!*M.WORKCENTER*!*M.OP_CODE","","","","dtJoin",True)
+	f.Intrinsic.Control.EndIf
+
+
+	
+	'Calculate runtime * quantity
+	f.Data.Datatable.AddExpressionColumn("dtJoin","RUNTIME_CALC","Float","[RUNTIME] * [QUANTITY]")
+	'Loop through joined table and update router line runtimes if a new runtime was calculated
+	f.Intrinsic.Control.For(v.Local.iC,0,v.DataTable.dtJoin.RowCount--,1)
+		f.Intrinsic.String.Build("ROUTER_SEQUENCE = '{0}'",v.DataTable.dtJoin(v.Local.iC).ROUTER_SEQUENCE!FIELDVALTRIM,v.Local.sSequence)
+		f.Data.Datatable.Compute("dtJoin","SUM(RUNTIME_CALC)",v.Local.sSequence,v.Local.fSumReturn)
+		
+		f.Intrinsic.Control.If(v.DataTable.dtJoin(v.Local.iC).LMO!FIELDVALTRIM,=,"L")
+			f.Intrinsic.String.Build("Select TOP 1 LINE_ROUTER from ROUTER_LINE where ROUTER = '{0}' and ROUTER_TYPE = 'L' and PART_WC_OUTSIDE = '{1}' and OPERATION = '{2}'",v.Local.sRouter,v.DataTable.dtJoin(v.Local.iC).WORKCENTER!FIELDVALTRIM,v.DataTable.dtJoin(v.Local.iC).OP_CODE!FIELDVALTRIM,v.Local.sSQL)
+		
+			f.ODBC.Connection!con.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+		f.Intrinsic.Control.ElseIf(v.DataTable.dtJoin(v.Local.iC).LMO!FIELDVALTRIM,=,"O")
+			f.Intrinsic.String.Build("Select TOP 1 LINE_ROUTER from ROUTER_LINE where ROUTER = '{0}' and LMO = 'O' and DESC_RT_LINE = '{1}'",v.Local.sRouter,v.DataTable.dtJoin(v.Local.iC).IDENTIFIER1!FIELDVALTRIM,v.Local.sSQL)
+		
+			'f.Intrinsic.String.Build("Select TOP 1 LINE_ROUTER from ROUTER_LINE where ROUTER = '{0}' and ROUTER_TYPE = 'L' and PART_WC_OUTSIDE = '{1}' and OPERATION = '{2}'",v.Local.sRouter,v.DataTable.dtJoin(v.Local.iC).WORKCENTER!FIELDVALTRIM,v.DataTable.dtJoin(v.Local.iC).OP_CODE!FIELDVALTRIM,v.Local.sSQL)
+		
+			f.ODBC.Connection!con.ExecuteAndReturn(v.Local.sSQL,v.Local.sRet)
+		f.Intrinsic.Control.EndIf
+		
+		f.Intrinsic.Control.If(v.Local.sRet.Trim,=,"")
+			f.Intrinsic.Control.GoTo("Escape")			
+		f.Intrinsic.Control.EndIf
+		
+		f.Intrinsic.Control.If(v.DataTable.dtJoin(v.Local.iC).LMO!FIELDVALTRIM,=,"L")
+			f.Intrinsic.String.Build("UPDATE ROUTER_LINE SET RUN_TIME = '{0}', RUN_TIME_D6 = '{1}' where ROUTER = '{2}' and LINE_ROUTER = '{3}' and ROUTER_TYPE = 'L'",v.Local.fSumReturn,v.Local.fSumReturn,v.Local.sRouter,v.Local.sRet,v.Local.sSQL)
+		f.Intrinsic.Control.ElseIf(v.DataTable.dtJoin(v.Local.iC).LMO!FIELDVALTRIM,=,"O")
+			f.Intrinsic.String.Build("UPDATE ROUTER_LINE SET RUN_TIME = '1', RUN_TIME_D6 = '1', RATE = '{0}' where ROUTER = '{1}' and LINE_ROUTER = '{2}' and LMO = 'O'",v.Local.fSumReturn,v.Local.sRouter,v.Local.sRet,v.Local.sSQL)
+		f.Intrinsic.Control.EndIf
+		
+		'f.Intrinsic.String.Build("UPDATE ROUTER_LINE SET RUN_TIME = '{0}', RUN_TIME_D6 = '{1}' where ROUTER = '{2}' and LINE_ROUTER = '{3}' and ROUTER_TYPE = 'L'",v.Local.fSumReturn,v.Local.fSumReturn,v.Local.sRouter,v.Local.sRet,v.Local.sSQL)
+		
+		'If new runtime was calculated, updated router lines runtime
+		f.Intrinsic.Control.If(v.DataTable.dtJoin(v.Local.iC).RUNTIME_CALC!FIELDVALTRIM,<>,"")
+			f.ODBC.Connection!con.Execute(v.Local.sSQL)		
+		f.Intrinsic.Control.EndIf
+		
+		f.Intrinsic.Control.Label("Escape")	
+	f.Intrinsic.Control.Next(v.Local.iC)
+	
+	v.Local.sSQL.Set("UPDATE ROUTER_LINE SET SIGNOFF_TYPE = 'G', SIGNOFF_GRPUSR = 'TSKAPPRV', FLAG_MAIN_COMMENT = 'T', UM_INVENTORY = '' WHERE PART_WC_OUTSIDE = 'TASK'")	
+	f.ODBC.Connection!con.Execute(v.Local.sSQL)
+	
+	f.Intrinsic.UI.Msgbox("Router Line runtimes have been updated.","Part Configurator",0,v.Local.iRet)
+	f.Intrinsic.Control.Label("NotFound")
+	
+	'Close datatables
+	f.Intrinsic.Control.If(v.DataTable.dtConfigMFG.Exists)
+		f.Data.Datatable.Close("dtConfigMFG")
+	f.Intrinsic.Control.EndIf
+	
+	f.Intrinsic.Control.If(v.DataTable.dtJoin.Exists)
+		f.Data.Datatable.Close("dtJoin")
+	f.Intrinsic.Control.EndIf
+	
+	f.Intrinsic.Control.If(v.DataTable.dtOrderConfig.Exists)
+		f.Data.Datatable.Close("dtOrderConfig")
+	f.Intrinsic.Control.EndIf
+	
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.ScriptButtonPress.End
+
+Program.Sub.PreSave.Start
+v.Local.sConfiguredPart.Declare
+F.Intrinsic.Control.Try
+	
+	v.Local.sConfiguredPart.Set(v.Passed.000092)
+	'Add Configured Part to passed txt file
+	f.Intrinsic.String.Build("{0}\CUSTOM\6957\ConfiguredPart.txt",v.Caller.GlobalDir,v.Local.sConfiguredPart)					
+	f.Intrinsic.File.String2File(v.Local.sConfiguredPart,v.Passed.000092)
+	
+			
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.PreSave.End
+
+Program.Sub.ConfigButtonOrder.Start
+v.Local.sOrderNo.Declare
+v.Local.sOrderLine.Declare
+v.Local.sOrderNoPath.Declare
+f.Intrinsic.Control.Try
+
+	v.Passed.GLOBAL.Set("O")
+	'Add Order No and Line to passed txt file
+	f.Intrinsic.String.Build("{0}\CUSTOM\6957\OrderNo.txt",v.Caller.GlobalDir,v.Local.sOrderNoPath)
+	f.Intrinsic.String.Build("{0}*!*{1}",v.passed.000060,v.Passed.000051,v.Local.sOrderNo)
+	f.Intrinsic.File.String2File(v.Local.sOrderNoPath,v.Local.sOrderNo)
+	
+	f.Global.Registry.AddValue(v.Caller.User,v.Caller.CompanyCode,"Order",6957,0,false,v.Local.sOrderNo,false,0,"",v.Ambient.Date,v.Ambient.Time)
+	
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+
+Program.Sub.ConfigButtonOrder.End
+
+Program.Sub.ConfigButtonQuote.Start
+v.Local.sQuoteNo.Declare
+v.Local.sQuoteLine.Declare
+v.Local.sQuoteNoPath.Declare
+f.Intrinsic.Control.Try
+
+	v.Passed.GLOBAL.Set("Q")
+	'Add Quote No and Line to passed txt file
+	f.Intrinsic.String.Build("{0}\CUSTOM\6957\QuoteNo.txt",v.Caller.GlobalDir,v.Local.sQuoteNoPath)
+	f.Intrinsic.String.Build("{0}*!*{1}",v.passed.000060,v.Passed.000051,v.Local.sQuoteNo)
+	f.Intrinsic.File.String2File(v.Local.sQuoteNoPath,v.Local.sQuoteNo)
+	
+	f.Global.Registry.AddValue(v.Caller.User,v.Caller.CompanyCode,"Quote",6957,0,false,v.Local.sQuoteNo,false,0,"",v.Ambient.Date,v.Ambient.Time)
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+
+Program.Sub.ConfigButtonQuote.End
+
+Program.Sub.CreateDir.Start
+V.Local.bRet.Declare(Boolean,False)
+f.Intrinsic.Control.Try
+
+	'Creating custom directory in Global file path if its not there
+	F.Intrinsic.Control.If(V.Caller.GlobalDir.Right1,=,"\")
+		F.Intrinsic.String.Build("{0}Custom\",V.Caller.GlobalDir,V.Global.sFileLocation)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Build("{0}\Custom\",V.Caller.GlobalDir,V.Global.sFileLocation)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.File.DirExists(V.Global.sFileLocation,V.Local.bRet)
+	
+	F.Intrinsic.Control.If(V.Local.bRet,=,False)
+		F.Intrinsic.File.CreateDir(V.Global.sFileLocation)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Build("{0}6957\",V.Global.sFileLocation,V.Global.sFileLocation)
+	
+	F.Intrinsic.File.DirExists(V.Global.sFileLocation,V.Local.bRet)
+	
+	F.Intrinsic.Control.If(V.Local.bRet,=,False)
+		F.Intrinsic.File.CreateDir(V.Global.sFileLocation)
+	F.Intrinsic.Control.EndIf
+
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.CreateDir.End
+
+Program.Sub.ErrorMsg.Start
+v.Local.sError.Declare
+f.Intrinsic.String.Build("Project GCG_6957_Config_Router.g2u {0}{0}Subroutine: {1}{0}Error: {2} with Description: {3}", v.Ambient.NewLine, v.Args.CurrentSub, v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+f.ODBC.Connection!con.Close
+f.Intrinsic.Control.End
+Program.Sub.ErrorMsg.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8375.18744$}$1
+${$6$}$Globalshop$}$20230215123447491$}$XbGA5Jlbk/pa9e8jvNC+5gB1AWnpDTHqi6JZpvXQRTqO8mZlfvxtdgXSuDxzXi7Yxc1z2zApDPNk/7TSZl9EZw==
+Program.Sub.Comments.End
