@@ -1,0 +1,11 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Variable.Local.sUserGroups.Declare(String)
+Variable.Local.bChk.Declare(Boolean)
+Variable.passed.000085.set("Update RT")
+Program.Sub.Main.end
